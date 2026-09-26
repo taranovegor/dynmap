@@ -72,3 +72,30 @@ jobs:
           name: dynmap-${{ matrix.module }}
           path: target/*.jar
           if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all platform jars
+        uses: actions/download-artifact@v8
+        with:
+          path: jars
+          pattern: dynmap-*
+          merge-multiple: true
+
+      - name: Compute short SHA
+        id: sha
+        run: echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.sha.outputs.short_sha }}
+          name: ${{ steps.sha.outputs.short_sha }}
+          draft: true
+          files: jars/*.jar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
