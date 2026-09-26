@@ -26,6 +26,19 @@ public abstract class DynmapServerInterface {
      */
     public abstract void scheduleServerTask(Runnable run, long delay);
     /**
+     * Schedule task to run on server-safe thread owning the given block location (the chunk's
+     * region on Folia) - defaults to scheduleServerTask(Runnable, long)
+     * @param run - runnable method
+     * @param delay - delay in server ticks (50msec)
+     * @param wname - world name
+     * @param x - block X
+     * @param y - block Y
+     * @param z - block Z
+     */
+    public void scheduleServerTask(Runnable run, long delay, String wname, int x, int y, int z) {
+        scheduleServerTask(run, delay);
+    }
+    /**
      * Call method on server-safe thread
      * @param task - Callable method
      * @param <T> - return value type for method called

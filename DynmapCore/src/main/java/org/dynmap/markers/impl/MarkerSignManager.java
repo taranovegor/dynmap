@@ -1,9 +1,10 @@
 package org.dynmap.markers.impl;
 
-import java.util.HashMap;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.dynmap.DynmapCore;
 import org.dynmap.common.DynmapChatColor;
@@ -21,6 +22,7 @@ public class MarkerSignManager {
     private static String defSignSet = null;
 
     private static class SignRec {
+        String id;
         String wname;
         int x, y, z;
         Marker m;
@@ -89,6 +91,7 @@ public class MarkerSignManager {
                     }
                     if(sign_cache != null) {
                         SignRec r = new SignRec();
+                        r.id = id;
                         r.wname = wname;
                         r.x = x;
                         r.y = y;
@@ -99,13 +102,13 @@ public class MarkerSignManager {
                 }
             }
         }
-        private HashMap<String, SignRec> sign_cache = null;
+        private ConcurrentHashMap<String, SignRec> sign_cache = null;
         
         public void run() {
             if(mgr == null)
                 return;
             if(sign_cache == null) {    /* Initialize sign cache */
-                sign_cache = new HashMap<String, SignRec>();
+                sign_cache = new ConcurrentHashMap<String, SignRec>();
                 Set<MarkerSet> sets = MarkerAPIImpl.api.getMarkerSets();
                 for(MarkerSet ms : sets) {
                     for(Marker m : ms.getMarkers()) {
@@ -130,8 +133,9 @@ public class MarkerSignManager {
                                     id = id.substring(0,  off);
                                 }
                                 rec.wname = id.substring(6);
+                                rec.id = m.getMarkerID();
                                 rec.m = m;
-                                sign_cache.put(m.getMarkerID(), rec);
+                                sign_cache.put(rec.id, rec);
                             }
                         } catch (NumberFormatException nfx) {
                         }
@@ -146,12 +150,18 @@ public class MarkerSignManager {
                 if(r.m.getMarkerSet() == null) {
                     iter.remove();
                 }
-                else {
-                    if(plugin.getServer().isSignAt(r.wname, r.x, r.y, r.z) == 0) {
-                        r.m.deleteMarker();
-                        iter.remove();
+            }
+            for(final SignRec r : new ArrayList<SignRec>(sign_cache.values())) {
+                plugin.getServer().scheduleServerTask(new Runnable() {
+                    public void run() {
+                        if(sign_cache.get(r.id) != r)
+                            return;
+                        if(plugin.getServer().isSignAt(r.wname, r.x, r.y, r.z) == 0) {
+                            r.m.deleteMarker();
+                            sign_cache.remove(r.id);
+                        }
                     }
-                }
+                }, 0, r.wname, r.x, r.y, r.z);
             }
             plugin.getServer().scheduleServerTask(sl, 60*20);
         }

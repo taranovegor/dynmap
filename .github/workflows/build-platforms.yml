@@ -2,6 +2,11 @@ name: Build platform jars
 
 on:
   workflow_dispatch:
+    inputs:
+      release:
+        description: Publish draft release with platform jars
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -75,6 +80,7 @@ jobs:
 
   release:
     needs: build
+    if: ${{ inputs.release }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
