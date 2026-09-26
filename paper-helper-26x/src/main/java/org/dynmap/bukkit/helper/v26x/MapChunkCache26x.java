@@ -13,12 +13,11 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.Property;
 import org.dynmap.renderer.DynmapBlockState;
-import org.bukkit.Bukkit;
 import org.bukkit.World;
-import org.bukkit.craftbukkit.CraftServer;
 import org.bukkit.craftbukkit.CraftWorld;
 import org.dynmap.DynmapChunk;
 import org.dynmap.bukkit.helper.BukkitWorld;
+import org.dynmap.bukkit.helper.TaskSchedulers;
 import org.dynmap.common.BiomeMap;
 import org.dynmap.common.chunk.GenericChunk;
 import org.dynmap.common.chunk.GenericChunkCache;
@@ -41,15 +40,24 @@ public class MapChunkCache26x extends GenericMapChunkCache {
 	}
 
 	@Override
-	protected Supplier<GenericChunk> getLoadedChunkAsync(DynmapChunk chunk) {
-		CompletableFuture<Optional<SerializableChunkData>> chunkData = CompletableFuture.supplyAsync(() -> {
-			CraftWorld cw = (CraftWorld) w;
-			LevelChunk c = cw.getHandle().getChunkIfLoaded(chunk.x, chunk.z);
-			if (c == null) {
-				return Optional.empty();
+	protected Supplier<GenericChunk> getLoadedChunkAsync(final DynmapChunk chunk) {
+		final CraftWorld cw = (CraftWorld) w;
+		final CompletableFuture<Optional<SerializableChunkData>> chunkData = new CompletableFuture<>();
+		TaskSchedulers.get().runAt(TaskSchedulers.dynmap(), cw, chunk.x, chunk.z, new Runnable() {
+			@Override
+			public void run() {
+				try {
+					LevelChunk c = cw.getHandle().getChunkIfLoaded(chunk.x, chunk.z);
+					if (c == null) {
+						chunkData.complete(Optional.<SerializableChunkData>empty());
+					} else {
+						chunkData.complete(Optional.of(SerializableChunkData.copyOf(cw.getHandle(), c)));
+					}
+				} catch (Throwable t) {
+					chunkData.completeExceptionally(t);
+				}
 			}
-			return Optional.of(SerializableChunkData.copyOf(cw.getHandle(), c));
-		}, ((CraftServer) Bukkit.getServer()).getServer());
+		}, 0);
 		return () -> {
 			try {
 				return chunkData.join().map(SerializableChunkData::write).map(NBT.NBTCompound::new).map(this::parseChunkFromNBT).orElse(null);
@@ -71,9 +79,26 @@ public class MapChunkCache26x extends GenericMapChunkCache {
 	}
 
 	@Override
-	protected Supplier<GenericChunk> loadChunkAsync(DynmapChunk chunk) {
-		CraftWorld cw = (CraftWorld) w;
-		CompletableFuture<Optional<CompoundTag>> genericChunk = cw.getHandle().getChunkSource().chunkMap.read(new ChunkPos(chunk.x, chunk.z));
+	protected Supplier<GenericChunk> loadChunkAsync(final DynmapChunk chunk) {
+		final CraftWorld cw = (CraftWorld) w;
+		final CompletableFuture<Optional<CompoundTag>> genericChunk = new CompletableFuture<>();
+		TaskSchedulers.get().runAt(TaskSchedulers.dynmap(), cw, chunk.x, chunk.z, new Runnable() {
+			@Override
+			public void run() {
+				try {
+					cw.getHandle().getChunkSource().chunkMap.read(new ChunkPos(chunk.x, chunk.z))
+							.whenComplete((data, error) -> {
+								if (error != null) {
+									genericChunk.completeExceptionally(error);
+								} else {
+									genericChunk.complete(data);
+								}
+							});
+				} catch (Throwable t) {
+					genericChunk.completeExceptionally(t);
+				}
+			}
+		}, 0);
 		return () -> {
 			try {
 				return genericChunk.join().map(NBT.NBTCompound::new).map(this::parseChunkFromNBT).orElse(null);

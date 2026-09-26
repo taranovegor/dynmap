@@ -81,6 +81,7 @@ import org.dynmap.PlayerList;
 import org.dynmap.bukkit.helper.BukkitVersionHelper;
 import org.dynmap.bukkit.helper.BukkitWorld;
 import org.dynmap.bukkit.helper.SnapshotCache;
+import org.dynmap.bukkit.helper.TaskSchedulers;
 import org.dynmap.bukkit.permissions.BukkitPermissions;
 import org.dynmap.bukkit.permissions.NijikokunPermissions;
 import org.dynmap.bukkit.permissions.OpPermissions;
@@ -262,7 +263,16 @@ public class DynmapPlugin extends JavaPlugin implements DynmapAPI {
 
         @Override
         public void scheduleServerTask(Runnable run, long delay) {
-            getServer().getScheduler().scheduleSyncDelayedTask(DynmapPlugin.this, run, delay);
+            TaskSchedulers.get().runSync(DynmapPlugin.this, run, delay);
+        }
+        @Override
+        public void scheduleServerTask(Runnable run, long delay, String wname, int x, int y, int z) {
+            World w = getServer().getWorld(wname);
+            if (w == null) {
+                scheduleServerTask(run, delay);
+                return;
+            }
+            TaskSchedulers.get().runAt(DynmapPlugin.this, w, x >> 4, z >> 4, run, delay);
         }
         @Override
         public DynmapPlayer[] getOnlinePlayers() {
@@ -293,7 +303,7 @@ public class DynmapPlugin extends JavaPlugin implements DynmapAPI {
         @Override
         public <T> Future<T> callSyncMethod(Callable<T> task) {
             if(DynmapPlugin.this.isEnabled())
-                return getServer().getScheduler().callSyncMethod(DynmapPlugin.this, task);
+                return TaskSchedulers.get().callSync(DynmapPlugin.this, task);
             else
                 return null;
         }
@@ -372,14 +382,15 @@ public class DynmapPlugin extends JavaPlugin implements DynmapAPI {
                         public void onPlayerChat(AsyncPlayerChatEvent evt) {
                             final Player p = evt.getPlayer();
                             final String msg = evt.getMessage();
-                            getServer().getScheduler().scheduleSyncDelayedTask(DynmapPlugin.this, new Runnable() {
+                            Runnable chatTask = new Runnable() {
                                 public void run() {
                                     DynmapPlayer dp = null;
                                     if(p != null)
                                         dp = new BukkitPlayer(p);
                                     core.listenerManager.processChatEvent(EventType.PLAYER_CHAT, dp, msg);
                                 }
-                            });
+                            };
+                            TaskSchedulers.get().runSync(DynmapPlugin.this, chatTask, 0);
                         }
                     }, DynmapPlugin.this);
                     break;
@@ -1036,7 +1047,7 @@ public class DynmapPlugin extends JavaPlugin implements DynmapAPI {
         tps = 20.0;
         perTickLimit = core.getMaxTickUseMS() * 1000000;
 
-        getServer().getScheduler().scheduleSyncRepeatingTask(this, new Runnable() {
+        TaskSchedulers.get().runTimer(this, new Runnable() {
             public void run() {
                 processTick();
             }
@@ -1083,6 +1094,7 @@ public class DynmapPlugin extends JavaPlugin implements DynmapAPI {
     
     @Override
     public void onDisable() {
+        TaskSchedulers.get().cancelAll(this);
         /* Core is being disabled - notify API disable */
         DynmapCommonAPIListener.apiTerminated();
 
@@ -1273,12 +1285,13 @@ public class DynmapPlugin extends JavaPlugin implements DynmapAPI {
             public void onPlayerJoin(PlayerJoinEvent evt) {
                 final DynmapPlayer dp = new BukkitPlayer(evt.getPlayer());
                 // Give other handlers a change to prep player (nicknames and such from Essentials)
-                getServer().getScheduler().scheduleSyncDelayedTask(DynmapPlugin.this, new Runnable() {
+                Runnable joinTask = new Runnable() {
                     @Override
                     public void run() {
                         core.listenerManager.processPlayerEvent(EventType.PLAYER_JOIN, dp);
                     }
-                }, 2);
+                };
+                TaskSchedulers.get().runSync(DynmapPlugin.this, joinTask, 2);
             }
             @EventHandler(priority=EventPriority.MONITOR, ignoreCancelled=true)
             public void onPlayerQuit(PlayerQuitEvent evt) {
@@ -1291,32 +1304,46 @@ public class DynmapPlugin extends JavaPlugin implements DynmapAPI {
 
     private class BlockCheckHandler implements Runnable {
         public void run() {
-            BlockToCheck btt;
-            while(blocks_to_check.isEmpty() != true) {
-                btt = blocks_to_check.pop();
-                Location loc = btt.loc;
-                World w = loc.getWorld();
-                if(!w.isChunkLoaded(loc.getBlockX()>>4, loc.getBlockZ()>>4))
-                    continue;
-                int bt = getBlockIdFromBlock(w.getBlockAt(loc));
-                /* Avoid stationary and moving water churn */
-                if(bt == 9) bt = 8;
-                if(btt.typeid == 9) btt.typeid = 8;
-                if((bt != btt.typeid) || (btt.data != w.getBlockAt(loc).getData())) {
-                    String wn = getWorld(w).getName();
-                    invalidateSnapshot(wn, loc.getBlockX(), loc.getBlockY(), loc.getBlockZ());                    	
-                    mapManager.touch(wn, loc.getBlockX(), loc.getBlockY(), loc.getBlockZ(), btt.trigger);
+            while(true) {
+                final BlockToCheck btt;
+                synchronized (this) {
+                    if(blocks_to_check.isEmpty())
+                        break;
+                    btt = blocks_to_check.pop();
                 }
+                Location loc = btt.loc;
+                TaskSchedulers.get().runAt(DynmapPlugin.this, loc.getWorld(), loc.getBlockX() >> 4, loc.getBlockZ() >> 4, new Runnable() {
+                    public void run() {
+                        checkBlockNow(btt);
+                    }
+                }, 0);
             }
-            blocks_to_check = null;
+            synchronized (this) {
+                blocks_to_check = null;
+            }
             /* Kick next run, if one is needed */
             startIfNeeded();
         }
-        public void startIfNeeded() {
+        private void checkBlockNow(BlockToCheck btt) {
+            Location loc = btt.loc;
+            World w = loc.getWorld();
+            if(!w.isChunkLoaded(loc.getBlockX()>>4, loc.getBlockZ()>>4))
+                return;
+            int bt = getBlockIdFromBlock(w.getBlockAt(loc));
+            /* Avoid stationary and moving water churn */
+            if(bt == 9) bt = 8;
+            if(btt.typeid == 9) btt.typeid = 8;
+            if((bt != btt.typeid) || (btt.data != w.getBlockAt(loc).getData())) {
+                String wn = getWorld(w).getName();
+                invalidateSnapshot(wn, loc.getBlockX(), loc.getBlockY(), loc.getBlockZ());
+                mapManager.touch(wn, loc.getBlockX(), loc.getBlockY(), loc.getBlockZ(), btt.trigger);
+            }
+        }
+        public synchronized void startIfNeeded() {
             if((blocks_to_check == null) && (blocks_to_check_accum.isEmpty() == false)) { /* More pending? */
                 blocks_to_check = blocks_to_check_accum;
                 blocks_to_check_accum = new LinkedList<BlockToCheck>();
-                getServer().getScheduler().scheduleSyncDelayedTask(DynmapPlugin.this, this, 10);
+                TaskSchedulers.get().runSync(DynmapPlugin.this, this, 10);
             }
         }
     }
@@ -1328,7 +1355,9 @@ public class DynmapPlugin extends JavaPlugin implements DynmapAPI {
         btt.typeid = getBlockIdFromBlock(b);
         btt.data = b.getData();
         btt.trigger = trigger;
-        blocks_to_check_accum.add(btt); /* Add to accumulator */
+        synchronized (btth) {
+            blocks_to_check_accum.add(btt); /* Add to accumulator */
+        }
         btth.startIfNeeded();
     }
     
