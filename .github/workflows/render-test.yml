@@ -1,0 +1,71 @@
+name: Render test
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'delta: new and changed blocks, full: every block state'
+        type: choice
+        options: [delta, full]
+        default: delta
+
+permissions:
+  contents: read
+
+jobs:
+  spigot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        # Minecraft versions to render on Paper. java is the JDK the server needs.
+        include:
+          - version: '26.3'
+            java: '25'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK ${{ matrix.java }}
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: gradle
+
+      - name: Build spigot jar
+        run: ./gradlew :spigot:build --console=plain
+
+      - name: Install Pillow
+        run: pip install pillow
+
+      - name: Render ${{ matrix.version }}
+        run: |
+          python3 .github/render-test/render_test.py \
+            --platform spigot \
+            --version ${{ matrix.version }} \
+            --mode ${{ inputs.mode || 'delta' }} \
+            --java "$JAVA_HOME/bin/java" \
+            --jar "$(ls target/Dynmap-*-spigot.jar)" \
+            --out render-out
+
+      - name: Summary
+        if: always()
+        run: |
+          [ -f render-out/summary.json ] && python3 -c "
+          import json
+          s = json.load(open('render-out/summary.json'))
+          print('### Render test: spigot ${{ matrix.version }}')
+          print('- states: %d (+ %d canary), biomes: %d' % (s['states'], s['canary'], s['biomes']))
+          for f in s['failures']: print('- FAILED: ' + f)
+          for n in s['notes']: print('- note: ' + n)
+          " >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload pictures and logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: render-spigot-${{ matrix.version }}
+          path: render-out/
+          if-no-files-found: warn

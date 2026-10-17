@@ -1,0 +1,6 @@
+# Blocks that look different in a version although their block states are the same
+# (new texture or new model). They are rendered in the delta run of that version.
+# Blocks with changed properties are found from the snapshots, so they do not need a line here.
+#
+# Format: <version> <block id>
+# Example: 1.21.5 minecraft:creaking_heart

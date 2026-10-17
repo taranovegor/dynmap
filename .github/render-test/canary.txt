@@ -1,0 +1,25 @@
+# Blocks rendered in every run, whatever the delta of the version is.
+# One block state per line, in /setblock syntax. Blocks the version does not have are skipped.
+# The biome strip (tinted blocks and a water pool in every biome) is always added to these.
+minecraft:stone
+minecraft:grass_block[snowy=false]
+minecraft:oak_log[axis=y]
+minecraft:oak_planks
+minecraft:oak_leaves[distance=1,persistent=true]
+minecraft:oak_stairs[facing=north,half=bottom,shape=straight]
+minecraft:oak_stairs[facing=east,half=top,shape=inner_left]
+minecraft:oak_fence[east=true,north=false,south=false,west=true]
+minecraft:oak_door[facing=north,half=lower,hinge=left,open=false,powered=false]
+minecraft:glass
+minecraft:glass_pane[east=true,north=true,south=false,west=false]
+minecraft:white_bed[facing=north,occupied=false,part=foot]
+minecraft:white_bed[facing=north,occupied=false,part=head]
+minecraft:chest[facing=north,type=single]
+minecraft:torch
+minecraft:redstone_wire[east=side,north=side,power=7,south=side,west=side]
+minecraft:rail[shape=north_south]
+minecraft:farmland[moisture=7]
+minecraft:snow[layers=4]
+minecraft:cactus[age=0]
+minecraft:water[level=0]
+minecraft:lava[level=0]
