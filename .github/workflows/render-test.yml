@@ -1,7 +1,8 @@
 name: Render test
 
+# Builds every platform jar, starts a server of each supported Minecraft version with it and renders the test world.
+# Manual for now: it is about 50 jobs.
 on:
-  pull_request:
   workflow_dispatch:
     inputs:
       mode:
@@ -9,20 +10,60 @@ on:
         type: choice
         options: [delta, full]
         default: delta
+      variants:
+        description: 'maps to render: flat, world or flat,world'
+        default: 'flat,world'
 
 permissions:
   contents: read
 
 jobs:
-  spigot:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        # Minecraft versions to render on Paper. java is the JDK the server needs.
+        # Keep in sync with the platform modules in settings.gradle and build-platforms.yml
         include:
-          - version: '26.3'
+          - module: spigot
+            java: '25'
+          - module: fabric-1.14.4
+            java: '21'
+          - module: fabric-1.15.2
+            java: '21'
+          - module: fabric-1.16.4
+            java: '21'
+          - module: fabric-1.17.1
+            java: '21'
+          - module: fabric-1.18.2
+            java: '21'
+          - module: fabric-1.19.4
+            java: '21'
+          - module: fabric-1.20.6
+            java: '21'
+          - module: fabric-1.21.6
+            java: '21'
+          - module: fabric-1.21.9-10
+            java: '21'
+          - module: fabric-1.21.11
+            java: '21'
+          - module: fabric-26.1
+            java: '25'
+          - module: forge-1.17.1
+            java: '21'
+          - module: forge-1.18.2
+            java: '21'
+          - module: forge-1.19.3
+            java: '21'
+          - module: forge-1.20.6
+            java: '21'
+          - module: forge-1.21.6
+            java: '21'
+          - module: forge-1.21.10
+            java: '21'
+          - module: forge-1.21.11
+            java: '21'
+          - module: forge-26.1
             java: '25'
     steps:
       - uses: actions/checkout@v7
@@ -34,20 +75,248 @@ jobs:
           java-version: ${{ matrix.java }}
           cache: gradle
 
-      - name: Build spigot jar
-        run: ./gradlew :spigot:build --console=plain
+      - name: Build ${{ matrix.module }}
+        run: ./gradlew :${{ matrix.module }}:build --console=plain
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v7
+        with:
+          name: jar-${{ matrix.module }}
+          path: target/Dynmap-*-${{ matrix.module }}.jar
+          if-no-files-found: error
+
+  render:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    name: ${{ matrix.module }} on ${{ matrix.version }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # module: the Dynmap module whose jar is tested, version: the Minecraft version of the server,
+        # java: the JDK that server needs
+        include:
+          - platform: spigot
+            module: spigot
+            version: '1.13.2'
+            java: '8'
+          - platform: spigot
+            module: spigot
+            version: '1.14.4'
+            java: '8'
+          - platform: spigot
+            module: spigot
+            version: '1.15.2'
+            java: '8'
+          - platform: spigot
+            module: spigot
+            version: '1.16.1'
+            java: '8'
+          - platform: spigot
+            module: spigot
+            version: '1.16.2'
+            java: '8'
+          - platform: spigot
+            module: spigot
+            version: '1.16.3'
+            java: '8'
+          - platform: spigot
+            module: spigot
+            version: '1.16.5'
+            java: '8'
+          - platform: spigot
+            module: spigot
+            version: '1.17.1'
+            java: '16'
+          - platform: spigot
+            module: spigot
+            version: '1.18.1'
+            java: '17'
+          - platform: spigot
+            module: spigot
+            version: '1.18.2'
+            java: '17'
+          - platform: spigot
+            module: spigot
+            version: '1.19.2'
+            java: '17'
+          - platform: spigot
+            module: spigot
+            version: '1.19.3'
+            java: '17'
+          - platform: spigot
+            module: spigot
+            version: '1.19.4'
+            java: '17'
+          - platform: spigot
+            module: spigot
+            version: '1.20.1'
+            java: '17'
+          - platform: spigot
+            module: spigot
+            version: '1.20.2'
+            java: '17'
+          - platform: spigot
+            module: spigot
+            version: '1.20.4'
+            java: '17'
+          - platform: spigot
+            module: spigot
+            version: '1.20.6'
+            java: '21'
+          - platform: spigot
+            module: spigot
+            version: '1.21.1'
+            java: '21'
+          - platform: spigot
+            module: spigot
+            version: '1.21.3'
+            java: '21'
+          - platform: spigot
+            module: spigot
+            version: '1.21.4'
+            java: '21'
+          - platform: spigot
+            module: spigot
+            version: '1.21.5'
+            java: '21'
+          - platform: spigot
+            module: spigot
+            version: '1.21.6'
+            java: '21'
+          - platform: spigot
+            module: spigot
+            version: '1.21.8'
+            java: '21'
+          - platform: spigot
+            module: spigot
+            version: '1.21.10'
+            java: '21'
+          - platform: spigot
+            module: spigot
+            version: '1.21.11'
+            java: '21'
+          - platform: spigot
+            module: spigot
+            version: '26.1.2'
+            java: '25'
+          - platform: spigot
+            module: spigot
+            version: '26.2'
+            java: '25'
+          - platform: spigot
+            module: spigot
+            version: '26.3'
+            java: '25'
+          - platform: fabric
+            module: fabric-1.14.4
+            version: '1.14.4'
+            java: '8'
+          - platform: fabric
+            module: fabric-1.15.2
+            version: '1.15.2'
+            java: '8'
+          - platform: fabric
+            module: fabric-1.16.4
+            version: '1.16.5'
+            java: '8'
+          - platform: fabric
+            module: fabric-1.17.1
+            version: '1.17.1'
+            java: '16'
+          - platform: fabric
+            module: fabric-1.18.2
+            version: '1.18.2'
+            java: '17'
+          - platform: fabric
+            module: fabric-1.19.4
+            version: '1.19.4'
+            java: '17'
+          - platform: fabric
+            module: fabric-1.20.6
+            version: '1.20.6'
+            java: '21'
+          - platform: fabric
+            module: fabric-1.21.6
+            version: '1.21.6'
+            java: '21'
+          - platform: fabric
+            module: fabric-1.21.9-10
+            version: '1.21.10'
+            java: '21'
+          - platform: fabric
+            module: fabric-1.21.11
+            version: '1.21.11'
+            java: '21'
+          - platform: fabric
+            module: fabric-26.1
+            version: '26.3'
+            java: '25'
+          - platform: forge
+            module: forge-1.17.1
+            version: '1.17.1'
+            java: '16'
+          - platform: forge
+            module: forge-1.18.2
+            version: '1.18.2'
+            java: '17'
+          - platform: forge
+            module: forge-1.19.3
+            version: '1.19.3'
+            java: '17'
+          - platform: forge
+            module: forge-1.20.6
+            version: '1.20.6'
+            java: '21'
+          - platform: forge
+            module: forge-1.21.6
+            version: '1.21.6'
+            java: '21'
+          - platform: forge
+            module: forge-1.21.10
+            version: '1.21.10'
+            java: '21'
+          - platform: forge
+            module: forge-1.21.11
+            version: '1.21.11'
+            java: '21'
+          - platform: forge
+            module: forge-26.1
+            version: '26.1.2'
+            java: '25'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up JDK ${{ matrix.java }}
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+
+      - name: Download jar
+        uses: actions/download-artifact@v8
+        with:
+          name: jar-${{ matrix.module }}
+          path: jar
+
+      - name: Cache servers
+        uses: actions/cache@v6
+        with:
+          path: .github/render-test/.cache
+          key: render-servers-${{ matrix.platform }}-${{ matrix.version }}
 
       - name: Install Pillow
         run: pip install pillow
 
-      - name: Render ${{ matrix.version }}
+      - name: Render
         run: |
           python3 .github/render-test/render_test.py \
-            --platform spigot \
+            --platform ${{ matrix.platform }} \
             --version ${{ matrix.version }} \
-            --mode ${{ inputs.mode || 'delta' }} \
+            --mode ${{ inputs.mode }} \
+            --variants ${{ inputs.variants }} \
             --java "$JAVA_HOME/bin/java" \
-            --jar "$(ls target/Dynmap-*-spigot.jar)" \
+            --jar "$(ls jar/Dynmap-*.jar)" \
             --out render-out
 
       - name: Summary
@@ -56,7 +325,7 @@ jobs:
           [ -f render-out/summary.json ] && python3 -c "
           import json
           s = json.load(open('render-out/summary.json'))
-          print('### Render test: spigot ${{ matrix.version }}')
+          print('### ${{ matrix.module }} on ${{ matrix.version }}')
           print('- states: %d (+ %d canary), biomes: %d' % (s['states'], s['canary'], s['biomes']))
           for f in s['failures']: print('- FAILED: ' + f)
           for n in s['notes']: print('- note: ' + n)
@@ -66,6 +335,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: render-spigot-${{ matrix.version }}
+          name: render-${{ matrix.module }}-${{ matrix.version }}
           path: render-out/
           if-no-files-found: warn
