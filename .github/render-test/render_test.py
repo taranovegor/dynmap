@@ -16,7 +16,7 @@ import argparse, glob, json, math, os, re, shutil, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from layout import (BIOME_COLS, M, SIZE_BIOME, block_commands, biome_commands, canary_states, feedback_rule,  # noqa: E402
+from layout import (BIOME_COLS, M, ORIGIN, SIZE_BIOME, block_commands, biome_commands, canary_states, feedback_rule,  # noqa: E402
                     floor_y, gamerules, level_type, load_biomes, select_states)
 from servers import Server, get_fabric, get_forge, get_paper, http_get  # noqa: E402
 from stitch import stitch  # noqa: E402
@@ -26,13 +26,17 @@ MAPS = {"flat": "flat", "world": "surface"}   # picture variant -> Dynmap map
 PREFIX = {"flat": "flat", "world": "t"}       # picture variant -> tile prefix on disk
 
 
-def seed_templates(dyn_dir, flat_scale, world_scale):
-    """Dynmap uses templates that already exist, so we set the map resolution there."""
+def seed_templates(dyn_dir, flat_scale, world_scale, area):
+    """Dynmap uses templates that already exist, so we set the map resolution there.
+    Only the test area is rendered (area is x0, z0, x1, z1): the server also generates chunks around it."""
     tdir = dyn_dir + "/templates"
     os.makedirs(tdir, exist_ok=True)
     for f in glob.glob(f"{TEMPLATES}/*.txt"):
         t = re.sub(r"iso_S_90_\w+", f"iso_S_90_{flat_scale}", open(f).read())
         t = re.sub(r"(iso_SE_\d+_)\w+", rf"\g<1>{world_scale}", t)
+        t = re.sub(r"(?m)^(    extrazoomout:.*)$",
+                   rf"\g<1>\n    hidestyle: air\n    visibilitylimits:\n      - x0: {area[0]}\n        z0: {area[1]}\n"
+                   rf"        x1: {area[2]}\n        z1: {area[3]}", t)
         open(os.path.join(tdir, os.path.basename(f)), "w").write(t)
 
 
@@ -47,13 +51,13 @@ def main():
     ap.add_argument("--mem", default="3G")
     ap.add_argument("--work", default=os.path.join(HERE, ".work"))
     ap.add_argument("--flat-scale", default="hires")
-    ap.add_argument("--world-scale", default=None, help="default: medres (hires is ~4x slower)")
+    ap.add_argument("--world-scale", default="hires", help="map resolution of the world map (medres is ~4x faster)")
     ap.add_argument("--variants", default="flat,world")
     ap.add_argument("--loader", default="", help="fabric: loader version (default: latest stable)")
     ap.add_argument("--api", default="", help="fabric: Fabric API version (default: latest for the Minecraft version)")
     a = ap.parse_args()
     v = a.version
-    world_scale = a.world_scale or "medres"
+    world_scale = a.world_scale
     variants = a.variants.split(",")
     fy = floor_y(v)
     out = os.path.abspath(a.out)
@@ -70,7 +74,8 @@ def main():
     if not biomes:
         notes.append("no biome list for this version: biome strip skipped")
     extent = M + max(width, BIOME_COLS * SIZE_BIOME[0] if biomes else 0) + M
-    zend += M
+    zend += M - ORIGIN   # from here on zend is the depth of the area, the commands use the absolute z
+    extent, zend = -(-extent // 16) * 16, -(-zend // 16) * 16   # whole chunks, so the floor leaves no strip of grass
     print(f"{v} {a.mode}: {len(selected)} selected + {len(canary)} canary states, {len(biomes)} biomes, "
           f"area {extent} x {zend}", flush=True)
 
@@ -95,7 +100,7 @@ def main():
         "spawn-monsters=false\nspawn-animals=false\nspawn-npcs=false\nallow-nether=false\n"
         "view-distance=4\nsimulation-distance=2\nmax-tick-time=-1\nspawn-protection=0\nenable-rcon=false\n"
         "pause-when-empty-seconds=-1\n")   # an empty vanilla server stops ticking and the Dynmap render stalls
-    seed_templates(dyn, a.flat_scale, world_scale)
+    seed_templates(dyn, a.flat_scale, world_scale, (ORIGIN, ORIGIN, ORIGIN + extent - 1, ORIGIN + zend - 1))
     if a.platform == "spigot":
         shutil.copy(get_paper(v, cache), rdir + "/server.jar")
         shutil.copy(a.jar, rdir + "/plugins/")
@@ -120,11 +125,11 @@ def main():
         srv.cmd("time set noon")
         srv.cmd("weather clear")
         for zs in range(0, zend, 128):   # at most 256 chunks per command
-            srv.cmd(f"forceload add 0 {zs} {extent - 1} {min(zs + 127, zend - 1)}")
+            srv.cmd(f"forceload add {ORIGIN} {ORIGIN + zs} {ORIGIN + extent - 1} {ORIGIN + min(zs + 127, zend - 1)}")
         srv.flush()
 
         loaded = False
-        corners = [(0, 0), (extent - 1, 0), (0, zend - 1), (extent - 1, zend - 1)]
+        corners = [(ORIGIN + x, ORIGIN + z) for x in (0, extent - 1) for z in (0, zend - 1)]
         for _ in range(120):
             m = srv.mark()
             for cx, cz in corners:
@@ -142,7 +147,8 @@ def main():
         srv.cmd(f"gamerule {feedback_rule(v)} false")
 
         for zs in range(0, zend, 100):
-            srv.cmd(f"fill 0 {fy} {zs} {extent - 1} {fy} {min(zs + 99, zend - 1)} minecraft:stone")
+            srv.cmd(f"fill {ORIGIN} {fy} {ORIGIN + zs} {ORIGIN + extent - 1} {fy} "
+                    f"{ORIGIN + min(zs + 99, zend - 1)} minecraft:stone")
         mark = srv.mark()
         for c in biocmds + bcmds:
             srv.cmd(c)
@@ -164,8 +170,8 @@ def main():
             notes.append("server has no /fillbiome: biome strip is not tinted per biome")
         time.sleep(5)
 
-        cx, cz = extent // 2, zend // 2
-        r = int(math.hypot(cx, cz)) + 16
+        r = int(math.hypot(extent // 2, zend // 2)) + 16
+        cx, cz = ORIGIN + extent // 2, ORIGIN + zend // 2
         for variant in variants:
             mp = MAPS[variant]
             mark = srv.mark()

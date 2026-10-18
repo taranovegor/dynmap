@@ -3,6 +3,9 @@ import glob, itertools, math, os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SNAPSHOTS = os.path.join(HERE, "snapshots")
+# the test area starts here, far from the spawn: the chunks around the spawn are always generated and would be
+# rendered as a big patch of grass around the area (a multiple of 16, so it starts at a chunk border)
+ORIGIN = 100000
 SPACING = 2             # one block state per 2x2 cells so neighbours do not connect
 M = 16                  # margin around everything, inside the loaded chunks
 SIZE_BIOME = (20, 12)   # x and z size of one biome cell
@@ -135,17 +138,18 @@ def grid(states, z0, walled, fy):
     cmds = []
     if walled and states:
         for zs in range(z0 - 2, z0 + depth + 2, 100):
-            cmds.append(f"fill {M - 2} {fy + 1} {zs} {M + width + 1} {fy + 1} {min(zs + 99, z0 + depth + 1)} "
+            cmds.append(f"fill {ORIGIN + M - 2} {fy + 1} {zs} {ORIGIN + M + width + 1} {fy + 1} "
+                        f"{min(zs + 99, z0 + depth + 1)} "
                         f"minecraft:stone")
     for i, s in enumerate(states):
-        cmds.append(f"setblock {M + (i % side) * SPACING} {fy + 1} {z0 + (i // side) * SPACING} {s} replace")
+        cmds.append(f"setblock {ORIGIN + M + (i % side) * SPACING} {fy + 1} {z0 + (i // side) * SPACING} {s} replace")
     return cmds, (width if states else 0), z0 + (depth if states else 0)
 
 
 def block_commands(states, fy):
     dry = [s for s in states if not is_wet(s)]
     wet = [s for s in states if is_wet(s)]
-    c1, w1, z1 = grid(dry, M, False, fy)
+    c1, w1, z1 = grid(dry, ORIGIN + M, False, fy)
     c2, w2, z2 = grid(wet, z1 + 8, True, fy)
     return c1 + c2, max(w1, w2), z2
 
@@ -154,7 +158,7 @@ def biome_commands(biomes, z0, fy, cur):
     items = [i for i in BIOME_ITEMS if f"minecraft:{i}" in cur]
     cmds = []
     for i, b in enumerate(biomes):
-        bx, bz = M + (i % BIOME_COLS) * SIZE_BIOME[0], z0 + (i // BIOME_COLS) * SIZE_BIOME[1]
+        bx, bz = ORIGIN + M + (i % BIOME_COLS) * SIZE_BIOME[0], z0 + (i // BIOME_COLS) * SIZE_BIOME[1]
         cmds.append(f"fillbiome {bx} {fy - 3} {bz} {bx + SIZE_BIOME[0] - 1} {fy + 20} {bz + SIZE_BIOME[1] - 1} {b}")
         for j, item in enumerate(items):
             cmds.append(f"setblock {bx + (j % 10) * 2} {fy + 1} {bz + (j // 10) * 2} minecraft:{item} replace")

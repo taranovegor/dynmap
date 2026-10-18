@@ -338,3 +338,23 @@ jobs:
           name: render-${{ matrix.module }}-${{ matrix.version }}
           path: render-out/
           if-no-files-found: warn
+
+  collect:
+    needs: render
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      # one folder per render job (render-<module>-<version>), the single artifacts stay available as they are
+      - name: Download all renders
+        uses: actions/download-artifact@v8
+        with:
+          pattern: render-*
+          path: renders
+
+      - name: Upload all renders
+        uses: actions/upload-artifact@v7
+        with:
+          name: renders-all
+          path: renders/
+          compression-level: 0   # pictures are compressed already
+          if-no-files-found: warn
