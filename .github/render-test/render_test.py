@@ -116,7 +116,7 @@ def main():
     rendered = []
     try:
         if not srv.wait(r"Done \(", 420):
-            failures.append("server did not start")
+            failures.append(f"server did not start: {srv.why}")
             raise RuntimeError("start")
         time.sleep(3)
         for rule, val in gamerules(v):
@@ -127,6 +127,10 @@ def main():
         for zs in range(0, zend, 128):   # at most 256 chunks per command
             srv.cmd(f"forceload add {ORIGIN} {ORIGIN + zs} {ORIGIN + extent - 1} {ORIGIN + min(zs + 127, zend - 1)}")
         srv.flush()
+        time.sleep(3)
+        if srv.problem():   # without Dynmap there is nothing to render, do not wait for it
+            failures.append(f"Dynmap is not running: {srv.problem()}")
+            raise RuntimeError("dynmap")
 
         loaded = False
         corners = [(ORIGIN + x, ORIGIN + z) for x in (0, extent - 1) for z in (0, zend - 1)]
@@ -155,7 +159,7 @@ def main():
         srv.cmd("say PLACED")
         srv.flush()
         if not srv.wait(r"\[Server\] PLACED", 900, mark):
-            failures.append("placing the blocks did not finish")
+            failures.append(f"placing the blocks did not finish: {srv.why}")
             raise RuntimeError("place")
         t = srv.text(mark)
         if "not loaded" in t:
@@ -177,10 +181,12 @@ def main():
             mark = srv.mark()
             srv.cmd(f"dynmap radiusrender world {cx} {cz} {r} {mp}")
             srv.flush()
-            if srv.wait(r"render of map.*completed|Render of .* completed", 3600, mark):
+            # Dynmap logs the progress every 100 tiles, so a silent log means the render is stuck
+            if srv.wait(r"render of map.*completed|Render of .* completed", 3600, mark, stall=600):
                 rendered.append(variant)
             else:
-                failures.append(f"render of map {mp} did not complete")
+                failures.append(f"render of map {mp} did not complete: {srv.why}")
+                break
         time.sleep(5)
 
         try:

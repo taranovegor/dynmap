@@ -81,6 +81,11 @@ def get_forge(v, java, cache):
     return inst, args
 
 
+# the log says Dynmap did not start: the server would sit there until the timeout otherwise
+BROKEN = re.compile(r"Error occurred while enabling dynmap[^\n]*|Cannot execute command 'dynmap'[^\n]*"
+                    r"|\[PluginRemapper\] Encountered exception[^\n]*|Unknown or incomplete command[^\n]*\n[^\n]*dynmap[^\n]*")
+
+
 class Server:
     def __init__(self, rdir, cmd):
         self.log = rdir + "/console.log"
@@ -103,14 +108,35 @@ class Server:
     def flush(self):
         self.proc.stdin.flush()
 
-    def wait(self, pattern, timeout, since=0):
+    def problem(self, since=0):
+        """The first line of the log that says Dynmap is not running, or None."""
+        m = BROKEN.search(self.text(since))
+        return m.group(0).strip() if m else None
+
+    def wait(self, pattern, timeout, since=0, stall=0):
+        """True when the pattern shows up in the log. False on timeout, when the server exits, when the log says
+        Dynmap is broken (see self.why) or when the log does not grow for `stall` seconds (0: no check)."""
         rx, end = re.compile(pattern), time.time() + timeout
+        size, moved = -1, time.time()
+        self.why = ""
         while time.time() < end:
-            if rx.search(self.text(since)):
+            text = self.text(since)
+            if rx.search(text):
                 return True
+            m = BROKEN.search(text)
+            if m:
+                self.why = "Dynmap is not running: " + m.group(0).strip()
+                return False
             if self.proc.poll() is not None:
-                return bool(rx.search(self.text(since)))
+                self.why = "server exited"
+                return False
+            if len(text) != size:
+                size, moved = len(text), time.time()
+            elif stall and time.time() - moved > stall:
+                self.why = f"nothing in the log for {stall} seconds"
+                return False
             time.sleep(1)
+        self.why = "timeout"
         return False
 
     def stop(self):
